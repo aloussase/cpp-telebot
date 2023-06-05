@@ -8,6 +8,7 @@
 
 #include "get_updates_payload.hpp"
 #include "get_updates_response.hpp"
+#include "command.hpp"
 
 static char *BOT_TOKEN = nullptr;
 static std::string API_PREFIX;
@@ -45,11 +46,26 @@ auto getUpdates(httplib::SSLClient &client, moodycamel::BlockingConcurrentQueue<
     }
 }
 
-auto logUpdates(moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
+[[noreturn]] auto logUpdates(moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
     for (;;) {
         get_updates_response update;
         queue.wait_dequeue(update);
         std::cout << update.message.text << "\n";
+    }
+}
+
+[[noreturn]] auto handleUpdates(moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
+    for (;;) {
+        get_updates_response update;
+        queue.wait_dequeue(update);
+
+        switch (command::parse(update.message.text)) {
+            case Command::SendSchedule:
+                std::cout << "Sending schedule\n";
+                break;
+            case Command::Noop:
+                break;
+        }
     }
 }
 
@@ -65,10 +81,16 @@ auto main() -> int {
 
     httplib::SSLClient client("api.telegram.org");
 
+    client.set_keep_alive(true);
+
     moodycamel::BlockingConcurrentQueue<get_updates_response> queue;
 
     std::thread updatesThread([&]() {
         getUpdates(client, queue);
+    });
+
+    std::thread handlerThread([&]() {
+        handleUpdates(queue);
     });
 
     std::thread loggingThread([&]() {
@@ -76,6 +98,7 @@ auto main() -> int {
     });
 
     updatesThread.join();
+    handlerThread.join();
     loggingThread.join();
 
     return 0;

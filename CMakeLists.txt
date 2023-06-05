@@ -10,7 +10,7 @@ add_subdirectory(third_party/cpp-httplib)
 add_subdirectory(third_party/json)
 add_subdirectory(third_party/concurrentqueue)
 
-add_executable(telebot main.cpp)
+add_executable(telebot main.cpp command.cpp)
 
 target_include_directories(telebot PRIVATE
         ${HTTPLIB_INCLUDE_DIR}
