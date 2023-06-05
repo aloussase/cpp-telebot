@@ -3,3 +3,6 @@ build
 *.key
 *.crt
 compile_commands.json
+.idea
+.env
+cmake-build-debug
