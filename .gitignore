@@ -1,0 +1,5 @@
+.ccls-cache
+build
+*.key
+*.crt
+compile_commands.json
