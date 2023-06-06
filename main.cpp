@@ -1,6 +1,7 @@
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 
 #include <iostream>
+#include <chrono>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -10,18 +11,22 @@
 #include "get_updates_response.hpp"
 #include "command.hpp"
 
+#define POLL_TIMEOUT 30
+
 static char *BOT_TOKEN = nullptr;
 static std::string API_PREFIX;
 
-auto getUpdates(httplib::SSLClient &client, moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
+auto getUpdates(httplib::SSLClient &client,
+                moodycamel::BlockingConcurrentQueue<get_updates_response> &command_queue,
+                moodycamel::BlockingConcurrentQueue<get_updates_response> &logging_queue) {
     auto lastUpdateId = -1;
 
-    for (;;) {
-        get_updates_payload payload;
+    get_updates_payload payload;
+    payload.timeout() = POLL_TIMEOUT;
+    payload.allowed_updates().emplace_back("messages");
 
-        payload.timeout() = 60;
+    for (;;) {
         payload.offset() = lastUpdateId + 1;
-        payload.allowed_updates().emplace_back("messages");
 
         auto result = client.Post(
                 API_PREFIX + "/getUpdates",
@@ -30,39 +35,67 @@ auto getUpdates(httplib::SSLClient &client, moodycamel::BlockingConcurrentQueue<
         );
 
         if (!result) {
-            std::cerr << "Request for updates failed with error: " << result.error() << "\n";
-            return;
+            continue;
         }
 
         nlohmann::json body = nlohmann::json::parse(result.value().body);
-        auto updates = body.at("result").get<std::vector<get_updates_response>>();
 
-        for (const auto &update: updates) {
-            if (update.update_id > lastUpdateId) {
-                lastUpdateId = update.update_id;
+        std::vector<nlohmann::json> results = body["result"];
+
+        for (const auto &result: results) {
+            int update_id = result["update_id"];
+
+            if (update_id > lastUpdateId) {
+                lastUpdateId = update_id;
             }
-            queue.enqueue(update);
+
+            try {
+                auto update = result.get<get_updates_response>();
+                command_queue.enqueue(update);
+                logging_queue.enqueue(update);
+            } catch (const std::exception &ex) {}
         }
     }
 }
 
 [[noreturn]] auto logUpdates(moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
+    get_updates_response update;
+
     for (;;) {
-        get_updates_response update;
         queue.wait_dequeue(update);
-        std::cout << update.message.text << "\n";
+        std::cout << "text = " << update.message.text
+                  << ", chat = " << update.message.chat.id
+                  << ", id = " << update.update_id
+                  << "\n";
     }
 }
 
-[[noreturn]] auto handleUpdates(moodycamel::BlockingConcurrentQueue<get_updates_response> &queue) {
+[[noreturn]] auto handleUpdates(
+        httplib::SSLClient &client,
+        moodycamel::BlockingConcurrentQueue<get_updates_response> &queue
+) {
+    get_updates_response update;
+
     for (;;) {
-        get_updates_response update;
         queue.wait_dequeue(update);
 
         switch (command::parse(update.message.text)) {
-            case Command::SendSchedule:
-                std::cout << "Sending schedule\n";
+            case Command::SendSchedule: {
+                httplib::Params params = {
+                        {"chat_id", std::to_string(update.message.chat.id)},
+                        {"text",    "Miércoles de 7H00 a 8H30"},
+                };
+
+                auto result = client.Post(API_PREFIX + "/sendMessage", params);
+
+                if (!result) {
+                    std::cerr << "There was an error sending the schedule: " << result.error() << "\n";
+                } else {
+                    std::cout << "Successfully sent schedule\n";
+                }
+
                 break;
+            }
             case Command::Noop:
                 break;
         }
@@ -81,20 +114,22 @@ auto main() -> int {
 
     httplib::SSLClient client("api.telegram.org");
 
+    client.set_connection_timeout(std::chrono::seconds(POLL_TIMEOUT * 2));
     client.set_keep_alive(true);
 
-    moodycamel::BlockingConcurrentQueue<get_updates_response> queue;
+    moodycamel::BlockingConcurrentQueue<get_updates_response> commands_queue;
+    moodycamel::BlockingConcurrentQueue<get_updates_response> logging_queue;
 
     std::thread updatesThread([&]() {
-        getUpdates(client, queue);
+        getUpdates(client, commands_queue, logging_queue);
     });
 
     std::thread handlerThread([&]() {
-        handleUpdates(queue);
+        handleUpdates(client, commands_queue);
     });
 
     std::thread loggingThread([&]() {
-        logUpdates(queue);
+        logUpdates(logging_queue);
     });
 
     updatesThread.join();
