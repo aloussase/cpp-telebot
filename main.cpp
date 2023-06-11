@@ -33,13 +33,15 @@ auto main() -> int {
   client.set_keep_alive(true);
 
   get_updates updates{client};
-  auto updatesThread = std::thread([&]() { updates.start(); });
 
   auto logger = std::make_shared<log_updates>();
   auto handler = std::make_shared<command_handler>(client);
 
   updates.add_observer(logger);
   updates.add_observer(handler);
+
+  auto updatesThread = std::thread([&]() { updates.start(); });
+  updatesThread.join();
 
   return 0;
 }
