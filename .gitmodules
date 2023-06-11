@@ -4,6 +4,3 @@
 [submodule "third_party/json"]
 	path = third_party/json
 	url = https://github.com/nlohmann/json
-[submodule "third_party/concurrentqueue"]
-	path = third_party/concurrentqueue
-	url = https://github.com/cameron314/concurrentqueue
