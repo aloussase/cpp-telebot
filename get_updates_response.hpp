@@ -7,7 +7,7 @@
 struct chat {
   chat() = default;
 
-  int id = {};
+  double id = {};
 };
 
 struct message {
